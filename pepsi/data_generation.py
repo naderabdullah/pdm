@@ -58,6 +58,33 @@ def generate_records(original_dicts, output_dir, num_records=10000):
         with open(os.path.join(output_dir, f'GeneratedFile_{i+1}.json'), 'w') as f:
             json.dump(new_record, f, indent=4)
 
+def generate_bad_records(original_dicts, output_dir):
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    
+    for i in range(7999, 10000):
+        new_record = {}
+        for key in original_dicts[0].keys():
+            if key == 'File':
+                new_record[key] = f'GeneratedFile_{i+1}.json'
+            elif key == 'Motion':
+                new_record[key] = random.choice(original_dicts)['Motion']
+            elif key == 'Probe_Temp':
+                original_values = [float(d[key]) for d in original_dicts if key in d and d[key] != '']
+                if original_values:
+                    min_val = 20
+                    max_val = 30
+                    new_record[key] = str(round(random.uniform(min_val, max_val), 2))
+            else:
+                original_values = [float(d[key]) for d in original_dicts if key in d and d[key] != '']
+                if original_values:
+                    min_val = min(original_values)
+                    max_val = max(original_values)
+                    new_record[key] = str(round(random.uniform(min_val, max_val), 2))
+    
+        with open(os.path.join(output_dir, f'GeneratedFile_{i+1}.json'), 'w') as f:
+            json.dump(new_record, f, indent=4)
+
 def main():
     # make list of .json files
     path = r'/home/pepsico/pepsi/preset_records'
@@ -76,6 +103,9 @@ def main():
     
     output_file = 'generated_records'
     generate_records(dicts, output_file)
+    generate_bad_records(dicts, output_file)
 
     #print(vals)
-    
+
+if __name__ == '__main__':
+    main()

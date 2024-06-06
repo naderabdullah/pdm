@@ -32,19 +32,19 @@ def main():
     #normalization
     scaler_X = StandardScaler()
     X_train = scaler_X.fit_transform(X_train)
-    X_test = scaler_X.transform(X_test)
+    X_test = scaler_X.fit_transform(X_test)
 
     scaler_y = StandardScaler()
     y_train = scaler_y.fit_transform(y_train)
     y_test = scaler_y.fit_transform(y_test)
 
     model = tf.keras.Sequential([
-        tf.keras.layers.Dense(64, activation='relu', input_shape=(X_train.shape[1],)),
-        tf.keras.layers.Dense(32, activation='relu'),
+        tf.keras.layers.Dense(64, activation='softmax', input_shape=(X_train.shape[1],)),
+        tf.keras.layers.Dense(32, activation='softmax'),
         tf.keras.layers.Dense(y_train.shape[1])
     ])
 
-    model.compile(optimizer='adam', loss='mean_squared_error', metrics=['mae'])
+    model.compile(optimizer='nadam', loss='mean_squared_error', metrics=['mae'])
 
     history = model.fit(X_train, y_train, epochs=50, validation_split=0.2, batch_size=32)
 

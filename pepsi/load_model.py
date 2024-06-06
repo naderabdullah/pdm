@@ -23,6 +23,7 @@ def main():
     data_dir = r'generated_records'
 
     X, y = load_data(data_dir, 'Probe_Temp')
+    threshold = 5.0
 
     # load the model
     model = tf.keras.models.load_model('sensor_model.keras')
