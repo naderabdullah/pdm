@@ -4,42 +4,54 @@ import os
 import json
 from sklearn.preprocessing import StandardScaler
 
-def load_data(data_dir, target):
+def load_data(data_dir):
     features = []
     labels = []
+
+    ACCEPTABLE_MIN = 4
+    ACCEPTABLE_MAX = 20
 
     for file_name in os.listdir(data_dir):
         if file_name.endswith('.json'):
             with open(os.path.join(data_dir, file_name), 'r') as f:
-                data = json.load(f)
-                feature = [float(data[key]) for key in data if key != 'File' and key != 'Motion']
-                label = [float(data['Ambient_Temp']), float(data['Probe_Temp'])]
-                features.append(feature)
-                labels.append(label)
+                data = json.load(f) 
+                sensor_values = data.get('sensorValues', {})
+                if 'Probe_Temp' in sensor_values and sensor_values['Probe_Temp']:
+                    probe_temp_value = float(sensor_values['Probe_Temp'][0]['value'])
+                    feature = [float(sensor_values[key][0]['value']) for key in sensor_values if key not in ['Probe_Temp', 'Motion'] and sensor_values[key]]
+                    label = 1 if ACCEPTABLE_MIN <= probe_temp_value <= ACCEPTABLE_MAX else 0
+                    features.append(feature)
+                    labels.append([label])
 
     return np.array(features), np.array(labels)
 
 def main():
-    data_dir = r'generated_records'
+    data_dir = r'records'
 
-    X, y = load_data(data_dir, 'Probe_Temp')
-    threshold = 5.0
+    X, y = load_data(data_dir)
 
-    # load the model
-    model = tf.keras.models.load_model('sensor_model.keras')
+    print(f'Loaded data shape: X={X.shape}, y={y.shape}')
 
+    # Load the model
+    model = tf.keras.models.load_model('sensor_model_with_classification.keras')
+
+    # Normalize the features
     scaler_X = StandardScaler()
     X_normalized = scaler_X.fit_transform(X)
 
-    # predict with the model
+    print(f'Normalized data shape: X_normalized={X_normalized.shape}')
+
+    # Predict with the model
     predictions = model.predict(X_normalized)
 
-    scaler_y = StandardScaler()
-    y_normalized = scaler_y.fit_transform(y)
-    predictions_inversed = np.round(scaler_y.inverse_transform(predictions), 2)
+    # Since we are predicting binary classification, we do not need to inverse transform
+    predictions = (predictions > 0.5).astype(int)
 
-    for i in range(10):
-        print(f'Prediction: {predictions_inversed[i]}')
+    for i in range(200):
+        print(f'Actual: {y[i]}, Predicted: {predictions[i]}')
 
 if __name__ == '__main__':
     main()
+
+
+
