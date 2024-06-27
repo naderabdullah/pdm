@@ -1,0 +1,85 @@
+{
+    "sensorValues": {
+        "Acceleration_X": [
+            {
+                "value": "9.64"
+            }
+        ],
+        "Acceleration_Y": [
+            {
+                "value": "-0.51"
+            }
+        ],
+        "Acceleration_Z": [
+            {
+                "value": "0.75"
+            }
+        ],
+        "Altitude": [
+            {
+                "value": "0.0"
+            }
+        ],
+        "Ambient_Temp": [
+            {
+                "value": "30.21"
+            }
+        ],
+        "GPS_Fix": [
+            {
+                "value": "0.0"
+            }
+        ],
+        "Humidity": [
+            {
+                "value": "31.98"
+            }
+        ],
+        "Infrared": [
+            {
+                "value": "18.53"
+            }
+        ],
+        "Latitude": [
+            {
+                "value": "0.0"
+            }
+        ],
+        "Light": [
+            {
+                "value": "24.66"
+            }
+        ],
+        "Longitude": [
+            {
+                "value": "0.0"
+            }
+        ],
+        "Magnetometer_X": [
+            {
+                "value": "-372.36"
+            }
+        ],
+        "Magnetometer_Y": [
+            {
+                "value": "-116.93"
+            }
+        ],
+        "Magnetometer_Z": [
+            {
+                "value": "-417.96"
+            }
+        ],
+        "Probe_Temp": [
+            {
+                "value": "27.0"
+            }
+        ],
+        "Visible": [
+            {
+                "value": "11956053.68"
+            }
+        ]
+    },
+    "File": "File_3.json"
+}
