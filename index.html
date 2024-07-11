@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Predictive Maintenance Dashboard</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; }
+        .container { width: 80%; margin: auto; }
+        .header { text-align: center; margin-bottom: 20px; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; }
+        input, select { width: 100%; padding: 8px; box-sizing: border-box; }
+        button { padding: 10px 20px; background-color: #007BFF; color: #fff; border: none; cursor: pointer; }
+        button:hover { background-color: #0056b3; }
+        .chart { margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Predictive Maintenance Dashboard</h1>
+        </div>
+        <div>
+            <form id="repairForm">
+                <div class="form-group">
+                    <label for="repair_time">Repair Time (YYYY-MM-DD HH):</label>
+                    <input type="text" id="repair_time" name="repair_time" required>
+                </div>
+                <div class="form-group">
+                    <label for="components">Faulty Components:</label>
+                    <select id="components" name="components" multiple required>
+                        <option value="compressor">Compressor</option>
+                        <option value="evaporator">Evaporator</option>
+                        <option value="condenser">Condenser</option>
+                    </select>
+                </div>
+                <button type="submit">Submit Repair Information</button>
+            </form>
+        </div>
+        <div class="chart">
+            <div id="chart"></div>
+        </div>
+        <div class="faulty-component">
+            Possible Faulty Component: <span id="faultyComponent">None</span>
+            <br>
+            Accuracy: <span id="accuracy">0%</span>
+        </div>
+    </div>
+
+    <script>
+        var layout = {
+            title: 'Probe Temperature',
+            xaxis: { title: 'Timestamp' },
+            yaxis: { title: 'Probe Temp' },
+        };
+
+        function updatePlot() {
+            $.getJSON('/data', function(data) {
+                var trace1 = {
+                    x: data.timestamps,
+                    y: data.y_inv,
+                    mode: 'lines',
+                    name: 'Actual'
+                };
+                var trace2 = {
+                    x: data.temp_anomaly_timestamps,
+                    y: data.y_temp_highs,
+                    mode: 'markers',
+                    name: 'Temp Highs',
+                    marker: { color: 'orange' }
+                };
+                var trace3 = {
+                    x: data.sustained_anomaly_timestamps,
+                    y: data.y_sustained_anomalies,
+                    mode: 'markers',
+                    name: 'Sustained Anomalies',
+                    marker: { color: 'red' }
+                };
+                var trace4 = {
+                    x: data.timestamps,
+                    y: Array(data.timestamps.length).fill(data.temp_threshold),
+                    mode: 'lines',
+                    name: 'Threshold',
+                    line: { color: 'red', dash: 'dash' }
+                }
+                var dataPlot = [trace1, trace2, trace3, trace4];
+                var plotDiv = document.getElementById('chart');
+                Plotly.newPlot(plotDiv, dataPlot, layout);
+
+                document.getElementById('faultyComponent').innerText = data.faulty_component;
+                document.getElementById('accuracy').innerText = data.accuracy;
+            });
+        }
+
+        $(document).ready(function() {
+            setInterval(updatePlot, 10000);
+
+            $('#repairForm').on('submit', function(event) {
+                event.preventDefault();
+                var repairData = {
+                    repair_time: $('#repair_time').val(),
+                    components: $('#components').val()
+                };
+                $.ajax({
+                    type: 'POST',
+                    url: '/submit',
+                    contentType: 'application/json',
+                    data: JSON.stringify(repairData),
+                    success: function(response) {
+                        alert('Repair information submitted successfully.');
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+</html>
