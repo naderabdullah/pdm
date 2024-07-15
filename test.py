@@ -90,10 +90,11 @@ def data():
     except pd.errors.EmptyDataError:
         df_new = pd.DataFrame()
 
-    data_combined, scaler, timestamps_combined = normalize_data(df_combined, scaler)
+    timestamps_combined = df_combined['Timestamp']
+    data_combined = df_combined[['Probe_Temp']].values
+
     X_combined, y_combined, ts_combined = create_dataset(data_combined, timestamps_combined)
-    y_inv = scaler.inverse_transform(y_combined)
-    temp_values = y_inv[:, 0]
+    temp_values = data_combined[:, 0]
 
     with open('threshold.txt', 'r') as f:
         temp_threshold = float(f.read())
@@ -112,16 +113,13 @@ def data():
     accuracy = 0.0
 
     if len(data_combined) == len(sustained_anomalies):
-        X_sustained = data_combined[sustained_anomalies].reshape(-1, 1, data_combined.shape[1])
+        X_sustained = data_combined[sustained_anomalies].reshape(-1, 1, 1)
         if X_sustained.size > 0:
             temp_diffs = X_sustained - temp_threshold
-            X_sustained_diff = temp_diffs.reshape(-1, data_combined.shape[1])
-            
-            # Normalize the prediction input
-            X_sustained_diff_normalized = normalize_prediction_input(X_sustained_diff, scaler)
-            X_sustained_diff_normalized = X_sustained_diff_normalized.reshape(-1, 1, data_combined.shape[1])
-            
-            predictions = model.predict(X_sustained_diff_normalized)
+            X_sustained_diff = temp_diffs.reshape(-1, 1, 1)
+            print(X_sustained_diff)
+
+            predictions = model.predict(X_sustained_diff)
             print(f"Predictions shape: {predictions.shape}")
             print(f"Predictions: {predictions}")
 
@@ -168,6 +166,8 @@ def submit():
     repair_time = datetime.strptime(repair_time, '%Y-%m-%d %H')
     print(f'Repair time: {repair_time}, Components: {components}')
 
+    df_combined['Timestamp'] = pd.to_datetime(df_combined['Timestamp'])
+
     # Find anomalies before the repair time
     anomalies_before_repair = df_combined[df_combined['Timestamp'] <= repair_time]
     anomalies_before_repair = anomalies_before_repair[repair_time - anomalies_before_repair['Timestamp'] <= timedelta(hours=1)]
@@ -175,16 +175,10 @@ def submit():
     if not anomalies_before_repair.empty:
         print(f"Anomalies before repair:\n{anomalies_before_repair}")
 
-        # Normalize the anomalies
-        anomalies_data, _, _ = normalize_data(anomalies_before_repair, scaler)
-        print(f"Normalized anomalies data:\n{anomalies_data}")
-
         with open('threshold.txt', 'r') as f:
             temp_threshold = float(f.read())
 
-        # Normalize the temp_threshold
-        temp_threshold_normalized = scaler.transform(np.array([np.full((anomalies_data.shape[1],), temp_threshold)]))[0, 0]
-        anomalies_data_diff = anomalies_data - temp_threshold_normalized
+        anomalies_data_diff = anomalies_before_repair[['Probe_Temp']].values - temp_threshold
 
         # Prepare data for training
         X_train = anomalies_data_diff[:, 0].reshape(-1, 1, 1)  # Adjusting shape for LSTM input
