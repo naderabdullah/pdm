@@ -2,14 +2,14 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import load_model
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Dropout
+from tensorflow.keras.utils import to_categorical
 from datetime import datetime, timedelta
 import plotly.graph_objs as go
 from flask import Flask, jsonify, render_template, request
 import time
 import threading
 import random
+import os
 
 app = Flask(__name__)
 model = load_model('LSTM.keras')
@@ -17,8 +17,15 @@ scaler = None
 df_combined = pd.read_csv('output.csv')  # Initial combined data
 
 # Initialize the start timestamp to the current time
-start_timestamp = datetime(year=2024, month=7, day=11, hour=11, minute=5, second=42)
 start_timestamp = datetime.now()
+
+# CSV file to store anomalies for each component
+anomalies_csv = 'component_anomalies.csv'
+
+# Create the CSV file if it doesn't exist
+if not os.path.exists(anomalies_csv):
+    df_components = pd.DataFrame(columns=['Compressor', 'Evaporator', 'Condenser'])
+    df_components.to_csv(anomalies_csv, index=False)
 
 def normalize_data(df, scaler=None):
     df['Timestamp'] = pd.to_datetime(df['Timestamp'])
@@ -35,6 +42,10 @@ def normalize_data(df, scaler=None):
     else:
         data = scaler.transform(data)
     return data, scaler, timestamps
+
+def normalize_prediction_input(data, scaler):
+    data_normalized = scaler.transform(data)
+    return data_normalized
 
 def create_dataset(data, timestamps):
     X, y, ts = [], [], []
@@ -59,7 +70,7 @@ def add_new_data():
         df_new = pd.DataFrame(new_record)
         df_new.to_csv('new_data.csv', mode='a', header=False, index=False)
         start_timestamp = new_timestamp  # Update the timestamp
-          # Add a new record every 5 seconds
+        time.sleep(.01)  # Add a new record every 5 seconds
 
 @app.route('/')
 def index():
@@ -69,69 +80,69 @@ def index():
 def data():
     global df_combined, scaler, model
 
-    # Simulate adding a new record from 'new_data.csv'
     try:
         df_new = pd.read_csv('new_data.csv')
         if not df_new.empty:
             new_record = df_new.iloc[0:1]
             df_combined = pd.concat([df_combined, new_record]).reset_index(drop=True)
-
-            # Save the remaining new data
             df_new = df_new.iloc[1:]
             df_new.to_csv('new_data.csv', index=False)
     except pd.errors.EmptyDataError:
-        # No new data, continue with existing data
         df_new = pd.DataFrame()
 
-    # Normalize the combined data
     data_combined, scaler, timestamps_combined = normalize_data(df_combined, scaler)
-
-    # Create dataset from combined data
     X_combined, y_combined, ts_combined = create_dataset(data_combined, timestamps_combined)
-
     y_inv = scaler.inverse_transform(y_combined)
-
     temp_values = y_inv[:, 0]
 
-    # Detect anomalies based on actual Probe_Temp values
     with open('threshold.txt', 'r') as f:
         temp_threshold = float(f.read())
-
-    # Normalize the temp_threshold
-    temp_threshold_normalized = scaler.transform(np.array([np.full((data_combined.shape[1],), temp_threshold)]))[0, 0]
-
-    temp_highs = data_combined[:, 0] > temp_threshold_normalized
-
+    temp_highs = temp_values > temp_threshold
     temp_anomaly_timestamps = np.array(ts_combined)[temp_highs]
 
-    # Check for sustained anomalies in real time
     sustained_anomalies = np.zeros(len(temp_highs), dtype=bool)
-    window_size = 60  # 60 minutes for one hour
-    tolerance = 5  # Number of allowed interruptions
+    window_size = 60
+    tolerance = 5
 
     for i in range(len(temp_highs) - window_size + 1):
         if np.sum(temp_highs[i:i + window_size]) >= (window_size - tolerance):
             sustained_anomalies[i:i + window_size] = True
 
-    # Ensure the lengths match before reshaping
+    faulty_component = "None"
+    accuracy = 0.0
+
     if len(data_combined) == len(sustained_anomalies):
         X_sustained = data_combined[sustained_anomalies].reshape(-1, 1, data_combined.shape[1])
         if X_sustained.size > 0:
-            temp_diffs = X_sustained - temp_threshold_normalized
-            X_sustained_diff = temp_diffs.reshape(-1, 1, data_combined.shape[1])
-            faulty_component_predictions = model.predict(X_sustained_diff)
-            component_labels = ['compressor', 'evaporator', 'condenser']
-            faulty_component_idx = np.argmax(faulty_component_predictions[0])
-            faulty_component = component_labels[faulty_component_idx]
-            accuracy = np.max(faulty_component_predictions[0]) * 100
-        else:
-            faulty_component = "None"
-            accuracy = 0.0
-    else:
-        faulty_component = "None"
-        accuracy = 0.0
+            temp_diffs = X_sustained - temp_threshold
+            X_sustained_diff = temp_diffs.reshape(-1, data_combined.shape[1])
+            
+            # Normalize the prediction input
+            X_sustained_diff_normalized = normalize_prediction_input(X_sustained_diff, scaler)
+            X_sustained_diff_normalized = X_sustained_diff_normalized.reshape(-1, 1, data_combined.shape[1])
+            
+            predictions = model.predict(X_sustained_diff_normalized)
+            print(f"Predictions shape: {predictions.shape}")
+            print(f"Predictions: {predictions}")
 
-    # Get timestamps for sustained anomalies
+            if predictions.shape[1] == 3:
+                component_labels = ['compressor', 'evaporator', 'condenser']
+                faulty_component_idx = np.argmax(predictions, axis=1)  # Get index of max value per sample
+                print(f"Faulty component indices: {faulty_component_idx}")
+                most_common_idx = np.bincount(faulty_component_idx).argmax()
+                if 0 <= most_common_idx < len(component_labels):
+                    faulty_component = component_labels[most_common_idx]
+                    accuracy = np.mean(np.max(predictions, axis=1)) * 100
+                    print(f"Predicted faulty component: {faulty_component} with accuracy {accuracy}%")
+                else:
+                    print(f"Invalid most_common_idx: {most_common_idx}, predictions: {predictions}")
+            else:
+                print("Predictions do not match expected shape for three classes.")
+        else:
+            print("Empty X_sustained array.")
+    else:
+        print("Mismatch in lengths between data_combined and sustained_anomalies.")
+
     sustained_anomaly_timestamps = np.array(ts_combined)[sustained_anomalies]
 
     return jsonify({
@@ -145,7 +156,6 @@ def data():
         'faulty_component': faulty_component,
         'accuracy': accuracy
     })
-
 
 @app.route('/submit', methods=['POST'])
 def submit():
@@ -163,52 +173,38 @@ def submit():
     anomalies_before_repair = anomalies_before_repair[repair_time - anomalies_before_repair['Timestamp'] <= timedelta(hours=1)]
 
     if not anomalies_before_repair.empty:
+        print(f"Anomalies before repair:\n{anomalies_before_repair}")
+
         # Normalize the anomalies
         anomalies_data, _, _ = normalize_data(anomalies_before_repair, scaler)
+        print(f"Normalized anomalies data:\n{anomalies_data}")
 
         with open('threshold.txt', 'r') as f:
             temp_threshold = float(f.read())
 
         # Normalize the temp_threshold
         temp_threshold_normalized = scaler.transform(np.array([np.full((anomalies_data.shape[1],), temp_threshold)]))[0, 0]
-
         anomalies_data_diff = anomalies_data - temp_threshold_normalized
 
-        # Save anomalies data to CSV
-        df_anomalies = pd.DataFrame(anomalies_data_diff, columns=['Compressor', 'Evaporator', 'Condenser'])
-        anomalies_data_diff.to_csv('anomalies.csv', index=False)
-
-        # Read anomalies data from CSV
-        df_anomalies = pd.read_csv('anomalies.csv')
-
         # Prepare data for training
-        X_train = []
-        y_train = []
+        X_train = anomalies_data_diff[:, 0].reshape(-1, 1, 1)  # Adjusting shape for LSTM input
+        print(X_train)
+        component_label = components[0]  # Assuming the user selected component is the first element
+        component_labels = {'compressor': 0, 'evaporator': 1, 'condenser': 2}
+        y_train = np.full((X_train.shape[0],), component_labels[component_label])
+        y_train = to_categorical(y_train, num_classes=3)  # One-hot encode the labels
 
-        for component in components:
-            values = df_anomalies[component].dropna().values
-            labels = [component] * len(values)
-            X_train.extend(values)
-            y_train.extend(labels)
+        print(f"Training data (X_train) shape: {X_train.shape}")
+        print(f"Training labels (y_train): {y_train}")
 
-        # Convert lists to numpy arrays
-        X_train = np.array(X_train).reshape(-1, 1)
-        y_train = np.array(y_train)
-
-        # Encode labels as integers
-        component_labels = {'Compressor': 0, 'Evaporator': 1, 'Condenser': 2}
-        y_train = np.array([component_labels[label] for label in y_train])
-
-        # Reshape X_train to 3D array for LSTM input
-        X_train = np.reshape(X_train, (X_train.shape[0], 1, 1))
-
+        # Train the model with the anomalies and their corresponding faulty component
         model.fit(X_train, y_train, epochs=5, batch_size=32, verbose=1)
-
-        # Convert X_anomalies and y_labels to DataFrame for viewing
-        print("Saved anomalies:\n", df_anomalies)
+        
+        # Save updated model
+        model.save('LSTM.keras')
+        print('Supervised model trained and saved.')
 
     return jsonify({'status': 'success'})
-
 
 if __name__ == '__main__':
     #data_thread = threading.Thread(target=add_new_data)
