@@ -24,21 +24,7 @@
             <h1>Predictive Maintenance Dashboard</h1>
         </div>
         <div>
-            <form id="repairForm">
-                <div class="form-group">
-                    <label for="repair_time">Repair Time (YYYY-MM-DD HH):</label>
-                    <input type="text" id="repair_time" name="repair_time" required>
-                </div>
-                <div class="form-group">
-                    <label for="components">Faulty Components:</label>
-                    <select id="components" name="components" multiple required>
-                        <option value="compressor">Compressor</option>
-                        <option value="evaporator">Evaporator</option>
-                        <option value="condenser">Condenser</option>
-                    </select>
-                </div>
-                <button type="submit">Submit Repair Information</button>
-            </form>
+            <button onclick="window.location.href='/submit_form'">Go to Submit Repair Information</button>
         </div>
         <div class="chart">
             <div id="chart"></div>
@@ -97,23 +83,6 @@
 
         $(document).ready(function() {
             setInterval(updatePlot, 10000);
-
-            $('#repairForm').on('submit', function(event) {
-                event.preventDefault();
-                var repairData = {
-                    repair_time: $('#repair_time').val(),
-                    components: $('#components').val()
-                };
-                $.ajax({
-                    type: 'POST',
-                    url: '/submit',
-                    contentType: 'application/json',
-                    data: JSON.stringify(repairData),
-                    success: function(response) {
-                        alert('Repair information submitted successfully.');
-                    }
-                });
-            });
         });
     </script>
 </body>

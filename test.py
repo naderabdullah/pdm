@@ -1,8 +1,11 @@
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
-from tensorflow.keras.models import load_model
-from tensorflow.keras.utils import to_categorical
+from tensorflow import keras
+from keras._tf_keras.keras.models import load_model, Sequential
+from keras._tf_keras.keras.utils import to_categorical
+from keras._tf_keras.keras.layers import LSTM, Dropout, Dense
+from keras._tf_keras.keras.optimizers import Adam
 from datetime import datetime, timedelta
 import plotly.graph_objs as go
 from flask import Flask, jsonify, render_template, request
@@ -15,6 +18,7 @@ app = Flask(__name__)
 model = load_model('LSTM.keras')
 scaler = None
 df_combined = pd.read_csv('output.csv')  # Initial combined data
+component_file = 'components.txt'
 
 # Initialize the start timestamp to the current time
 start_timestamp = datetime.now()
@@ -27,6 +31,43 @@ if not os.path.exists(anomalies_csv):
     df_components = pd.DataFrame(columns=['Compressor', 'Evaporator', 'Condenser'])
     df_components.to_csv(anomalies_csv, index=False)
 
+def expand_model(old_model, num_classes):
+    # Extract weights from the existing model
+    old_weights = [layer.get_weights() for layer in old_model.layers[:-1]]  # Exclude the output layer weights
+    old_output_weights = old_model.layers[-1].get_weights()
+    
+    # Create a new model with the same architecture but expanded output layer
+    new_model = Sequential()
+    new_model.add(LSTM(50, return_sequences=True, input_shape=(1, 1)))
+    new_model.add(Dropout(0.2))
+    new_model.add(LSTM(50, return_sequences=False))
+    new_model.add(Dropout(0.2))
+    new_model.add(Dense(num_classes, activation='softmax'))
+    
+    # Set weights for the new model
+    for i, layer in enumerate(new_model.layers[:-1]):
+        layer.set_weights(old_weights[i])
+    
+    # Initialize new output layer weights
+    old_output_weights[0] = np.pad(old_output_weights[0], ((0, 0), (0, num_classes - old_output_weights[0].shape[1])), 'constant')
+    old_output_weights[1] = np.pad(old_output_weights[1], (0, num_classes - old_output_weights[1].shape[0]), 'constant')
+    new_model.layers[-1].set_weights(old_output_weights)
+    
+    # Compile the new model
+    new_model.compile(optimizer=Adam(learning_rate=0.001), loss='categorical_crossentropy', metrics=['accuracy'])
+    
+    return new_model
+
+def load_components():
+    with open(component_file, 'r') as f:
+        components = [line.strip() for line in f.readlines()]
+    return components
+
+def save_component(new_component):
+    with open(component_file, 'a') as f:
+        f.write(f"{new_component}\n")
+
+# Method for normalizing the data, but normalization is not being used in training or prediction due to the existence of a threshold
 def normalize_data(df, scaler=None):
     df['Timestamp'] = pd.to_datetime(df['Timestamp'])
     df['Formatted_Timestamp'] = df['Timestamp'].dt.strftime('%m/%d/%Y %H:%M:%S')
@@ -65,7 +106,7 @@ def add_new_data():
             'Acceleration_X': [0], 'Acceleration_Y': [0], 'Acceleration_Z': [0], 'Altitude': [0],
             'Ambient_Temp': [0], 'GPS_Fix': [0], 'Humidity': [0], 'Infrared': [0], 'Latitude': [0],
             'Light': [0], 'Longitude': [0], 'Magnetometer_X': [0], 'Magnetometer_Y': [0], 'Magnetometer_Z': [0],
-            'Probe_Temp': [round(random.uniform(20, 25), 2)], 'Visible': [0]
+            'Probe_Temp': [round(random.uniform(16, 20), 2)], 'Visible': [0]
         }
         df_new = pd.DataFrame(new_record)
         df_new.to_csv('new_data.csv', mode='a', header=False, index=False)
@@ -78,7 +119,10 @@ def index():
 
 @app.route('/data')
 def data():
-    global df_combined, scaler, model
+    global df_combined, model
+
+    # Load the component list
+    component_labels = load_components()
 
     try:
         df_new = pd.read_csv('new_data.csv')
@@ -90,6 +134,7 @@ def data():
     except pd.errors.EmptyDataError:
         df_new = pd.DataFrame()
 
+    df_combined['Timestamp'] = pd.to_datetime(df_combined['Timestamp'])
     timestamps_combined = df_combined['Timestamp']
     data_combined = df_combined[['Probe_Temp']].values
 
@@ -103,10 +148,10 @@ def data():
 
     sustained_anomalies = np.zeros(len(temp_highs), dtype=bool)
     window_size = 60
-    tolerance = 5
+    tolerance = 0
 
     for i in range(len(temp_highs) - window_size + 1):
-        if np.sum(temp_highs[i:i + window_size]) >= (window_size - tolerance):
+        if np.sum(temp_highs[i:i + window_size] & (data_combined[i:i + window_size].flatten() > temp_threshold)) >= (window_size - tolerance):
             sustained_anomalies[i:i + window_size] = True
 
     faulty_component = "None"
@@ -123,19 +168,23 @@ def data():
             print(f"Predictions shape: {predictions.shape}")
             print(f"Predictions: {predictions}")
 
-            if predictions.shape[1] == 3:
-                component_labels = ['compressor', 'evaporator', 'condenser']
+            num_classes = predictions.shape[1]
+            if num_classes > 0:
                 faulty_component_idx = np.argmax(predictions, axis=1)  # Get index of max value per sample
                 print(f"Faulty component indices: {faulty_component_idx}")
                 most_common_idx = np.bincount(faulty_component_idx).argmax()
                 if 0 <= most_common_idx < len(component_labels):
                     faulty_component = component_labels[most_common_idx]
                     accuracy = np.mean(np.max(predictions, axis=1)) * 100
-                    print(f"Predicted faulty component: {faulty_component} with accuracy {accuracy}%")
+                    if abs(accuracy - (100 / len(component_labels))) < 1:
+                        faulty_component = "Unknown"
+                        accuracy = 0.0
+                    else:
+                        print(f"Predicted faulty component: {faulty_component} with accuracy {accuracy}%")
                 else:
                     print(f"Invalid most_common_idx: {most_common_idx}, predictions: {predictions}")
             else:
-                print("Predictions do not match expected shape for three classes.")
+                print("Predictions do not match expected shape for any classes.")
         else:
             print("Empty X_sustained array.")
     else:
@@ -155,16 +204,29 @@ def data():
         'accuracy': accuracy
     })
 
+@app.route('/submit_form')
+def submit_form():
+    return render_template('submit.html')
+
 @app.route('/submit', methods=['POST'])
 def submit():
-    global model, scaler, df_combined
+    global model, df_combined
     data = request.get_json()
     repair_time = data['repair_time']
     components = data['components']
+    new_component = data.get('new_component', '').strip().lower()
+
+    # Load the component list
+    component_labels = load_components()
+
+    # Add new component if provided and not already in the list
+    if new_component and new_component not in component_labels:
+        component_labels.append(new_component)
+        save_component(new_component)
 
     # Process the repair time and components
     repair_time = datetime.strptime(repair_time, '%Y-%m-%d %H')
-    print(f'Repair time: {repair_time}, Components: {components}')
+    print(f'Repair time: {repair_time}, Components: {components}, New Component: {new_component}')
 
     df_combined['Timestamp'] = pd.to_datetime(df_combined['Timestamp'])
 
@@ -183,16 +245,26 @@ def submit():
         # Prepare data for training
         X_train = anomalies_data_diff[:, 0].reshape(-1, 1, 1)  # Adjusting shape for LSTM input
         print(X_train)
-        component_label = components[0]  # Assuming the user selected component is the first element
-        component_labels = {'compressor': 0, 'evaporator': 1, 'condenser': 2}
-        y_train = np.full((X_train.shape[0],), component_labels[component_label])
-        y_train = to_categorical(y_train, num_classes=3)  # One-hot encode the labels
+
+        # Update component_labels dynamically
+        component_labels_dict = {component: idx for idx, component in enumerate(component_labels)}
+        if new_component and new_component not in component_labels:
+            component_labels[new_component] = len(component_labels)
+
+        # Assuming the user selected component is the first element
+        component_label = components[0] if components else new_component
+        y_train = np.full((X_train.shape[0],), component_labels_dict[component_label])
+        y_train = to_categorical(y_train, num_classes=len(component_labels))  # One-hot encode the labels
 
         print(f"Training data (X_train) shape: {X_train.shape}")
         print(f"Training labels (y_train): {y_train}")
 
+        # If the number of classes has changed, recreate and recompile the model
+        if model.output_shape[1] != len(component_labels):
+            model = expand_model(model, len(component_labels))
+        
         # Train the model with the anomalies and their corresponding faulty component
-        model.fit(X_train, y_train, epochs=5, batch_size=32, verbose=1)
+        model.fit(X_train, y_train, epochs=10, batch_size=32, verbose=1)
         
         # Save updated model
         model.save('LSTM.keras')
