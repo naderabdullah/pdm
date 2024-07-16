@@ -113,17 +113,8 @@ def add_new_data():
         start_timestamp = new_timestamp  # Update the timestamp
         time.sleep(.01)  # Add a new record every 5 seconds
 
-@app.route('/')
-def index():
-    return render_template('index.html')
-
-@app.route('/data')
-def data():
-    global df_combined, model
-
-    # Load the component list
-    component_labels = load_components()
-
+def update_combined_data():
+    global df_combined
     try:
         df_new = pd.read_csv('new_data.csv')
         if not df_new.empty:
@@ -133,6 +124,20 @@ def data():
             df_new.to_csv('new_data.csv', index=False)
     except pd.errors.EmptyDataError:
         df_new = pd.DataFrame()
+
+@app.route('/')
+def index():
+    update_combined_data()
+    return render_template('index.html')
+
+@app.route('/data')
+def data():
+    global df_combined, model
+
+    # Load the component list
+    component_labels = load_components()
+
+    update_combined_data()
 
     df_combined['Timestamp'] = pd.to_datetime(df_combined['Timestamp'])
     timestamps_combined = df_combined['Timestamp']
@@ -146,13 +151,14 @@ def data():
     temp_highs = temp_values > temp_threshold
     temp_anomaly_timestamps = np.array(ts_combined)[temp_highs]
 
-    sustained_anomalies = np.zeros(len(temp_highs), dtype=bool)
     window_size = 60
-    tolerance = 0
+    tolerance = 5
+    sustained_anomalies = np.zeros_like(temp_highs, dtype=bool)
 
     for i in range(len(temp_highs) - window_size + 1):
-        if np.sum(temp_highs[i:i + window_size] & (data_combined[i:i + window_size].flatten() > temp_threshold)) >= (window_size - tolerance):
-            sustained_anomalies[i:i + window_size] = True
+        window_values = data_combined[i:i + window_size].flatten()
+        if np.sum(temp_highs[i:i + window_size] & (window_values > temp_threshold)) >= (window_size - tolerance):
+            sustained_anomalies[i:i + window_size] = (window_values > temp_threshold)
 
     faulty_component = "None"
     accuracy = 0.0
@@ -204,15 +210,37 @@ def data():
         'accuracy': accuracy
     })
 
+@app.route('/get_components')
+def get_components():
+    update_combined_data()
+    components = load_components()
+    return jsonify({'components': components})
+
 @app.route('/submit_form')
 def submit_form():
+    update_combined_data()
     return render_template('submit.html')
+
+@app.route('/add_component', methods=['POST'])
+def add_component():
+    data = request.get_json()
+    new_component = data.get('new_component', '').strip().lower()
+    
+    if new_component:
+        component_labels = load_components()
+        if new_component not in component_labels:
+            save_component(new_component)
+            return jsonify({'status': 'success'})
+        else:
+            return jsonify({'status': 'exists'})
+    return jsonify({'status': 'error'})
 
 @app.route('/submit', methods=['POST'])
 def submit():
     global model, df_combined
     data = request.get_json()
     repair_time = data['repair_time']
+    time_delta = int(data['time_delta'])
     components = data['components']
     new_component = data.get('new_component', '').strip().lower()
 
@@ -226,13 +254,13 @@ def submit():
 
     # Process the repair time and components
     repair_time = datetime.strptime(repair_time, '%Y-%m-%d %H')
-    print(f'Repair time: {repair_time}, Components: {components}, New Component: {new_component}')
+    print(f'Repair time: {repair_time}, TimeDelta: {time_delta}, Components: {components}, New Component: {new_component}')
 
     df_combined['Timestamp'] = pd.to_datetime(df_combined['Timestamp'])
 
     # Find anomalies before the repair time
     anomalies_before_repair = df_combined[df_combined['Timestamp'] <= repair_time]
-    anomalies_before_repair = anomalies_before_repair[repair_time - anomalies_before_repair['Timestamp'] <= timedelta(hours=1)]
+    anomalies_before_repair = anomalies_before_repair[repair_time - anomalies_before_repair['Timestamp'] <= timedelta(hours=time_delta)]
 
     if not anomalies_before_repair.empty:
         print(f"Anomalies before repair:\n{anomalies_before_repair}")
@@ -264,7 +292,7 @@ def submit():
             model = expand_model(model, len(component_labels))
         
         # Train the model with the anomalies and their corresponding faulty component
-        model.fit(X_train, y_train, epochs=10, batch_size=32, verbose=1)
+        model.fit(X_train, y_train, epochs=20, batch_size=32, verbose=1)
         
         # Save updated model
         model.save('LSTM.keras')
