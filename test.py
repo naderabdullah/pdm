@@ -6,6 +6,7 @@ from keras._tf_keras.keras.models import load_model, Sequential
 from keras._tf_keras.keras.utils import to_categorical
 from keras._tf_keras.keras.layers import LSTM, Dropout, Dense
 from keras._tf_keras.keras.optimizers import Adam
+from keras._tf_keras.keras.regularizers import l2
 from datetime import datetime, timedelta
 import plotly.graph_objs as go
 from flask import Flask, jsonify, render_template, request
@@ -22,6 +23,7 @@ component_file = 'components.txt'
 
 # Initialize the start timestamp to the current time
 start_timestamp = datetime.now()
+#start_timestamp = datetime(year=2024, month=7, day=16, hour=19, minute=2, second=57)
 
 # CSV file to store anomalies for each component
 anomalies_csv = 'component_anomalies.csv'
@@ -38,11 +40,11 @@ def expand_model(old_model, num_classes):
     
     # Create a new model with the same architecture but expanded output layer
     new_model = Sequential()
-    new_model.add(LSTM(50, return_sequences=True, input_shape=(1, 1)))
+    new_model.add(LSTM(50, return_sequences=True, input_shape=(1, 1), kernel_regularizer=l2(0.001)))
     new_model.add(Dropout(0.2))
-    new_model.add(LSTM(50, return_sequences=False))
+    new_model.add(LSTM(50, return_sequences=False, kernel_regularizer=l2(0.001)))
     new_model.add(Dropout(0.2))
-    new_model.add(Dense(num_classes, activation='softmax'))
+    new_model.add(Dense(num_classes, activation='softmax', kernel_regularizer=l2(0.001)))
     
     # Set weights for the new model
     for i, layer in enumerate(new_model.layers[:-1]):
@@ -140,7 +142,7 @@ def data():
     update_combined_data()
 
     df_combined['Timestamp'] = pd.to_datetime(df_combined['Timestamp'])
-    timestamps_combined = df_combined['Timestamp']
+    timestamps_combined = df_combined['Timestamp'].dt.strftime('%m/%d/%Y %H:%M:%S')
     data_combined = df_combined[['Probe_Temp']].values
 
     X_combined, y_combined, ts_combined = create_dataset(data_combined, timestamps_combined)
@@ -159,6 +161,21 @@ def data():
         window_values = data_combined[i:i + window_size].flatten()
         if np.sum(temp_highs[i:i + window_size] & (window_values > temp_threshold)) >= (window_size - tolerance):
             sustained_anomalies[i:i + window_size] = (window_values > temp_threshold)
+
+    # Check if all values in the last hour are below the threshold
+    last_hour = df_combined[df_combined['Timestamp'] >= df_combined['Timestamp'].max() - timedelta(hours=1)]
+    if last_hour.empty or (last_hour['Probe_Temp'] <= temp_threshold).all():
+        return jsonify({
+            'timestamps': timestamps_combined.tolist(),
+            'y_inv': temp_values.tolist(),
+            'temp_anomaly_timestamps': temp_anomaly_timestamps.tolist(),
+            'y_temp_highs': temp_values[temp_highs].tolist(),
+            'sustained_anomaly_timestamps': [],
+            'y_sustained_anomalies': [],
+            'temp_threshold': temp_threshold,
+            'faulty_component': "None",
+            'accuracy': 0.0
+        })
 
     faulty_component = "None"
     accuracy = 0.0
@@ -181,8 +198,8 @@ def data():
                 most_common_idx = np.bincount(faulty_component_idx).argmax()
                 if 0 <= most_common_idx < len(component_labels):
                     faulty_component = component_labels[most_common_idx]
-                    accuracy = np.mean(np.max(predictions, axis=1)) * 100
-                    if abs(accuracy - (100 / len(component_labels))) < 1:
+                    accuracy = round(np.mean(np.max(predictions, axis=1)) * 100, 2)
+                    if abs(accuracy - (100 / len(component_labels))) < 5:
                         faulty_component = "Unknown"
                         accuracy = 0.0
                     else:
@@ -209,6 +226,7 @@ def data():
         'faulty_component': faulty_component,
         'accuracy': accuracy
     })
+
 
 @app.route('/get_components')
 def get_components():
@@ -253,7 +271,7 @@ def submit():
         save_component(new_component)
 
     # Process the repair time and components
-    repair_time = datetime.strptime(repair_time, '%Y-%m-%d %H')
+    repair_time = datetime.strptime(repair_time, '%m/%d/%Y %H')
     print(f'Repair time: {repair_time}, TimeDelta: {time_delta}, Components: {components}, New Component: {new_component}')
 
     df_combined['Timestamp'] = pd.to_datetime(df_combined['Timestamp'])
@@ -292,7 +310,7 @@ def submit():
             model = expand_model(model, len(component_labels))
         
         # Train the model with the anomalies and their corresponding faulty component
-        model.fit(X_train, y_train, epochs=20, batch_size=32, verbose=1)
+        model.fit(X_train, y_train, epochs=10, batch_size=32, verbose=1)
         
         # Save updated model
         model.save('LSTM.keras')

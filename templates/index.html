@@ -16,15 +16,13 @@
         button { padding: 10px 20px; background-color: #007BFF; color: #fff; border: none; cursor: pointer; }
         button:hover { background-color: #0056b3; }
         .chart { margin-top: 20px; }
+        .faulty-component { margin-top: 20px; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <h1>Predictive Maintenance Dashboard</h1>
-        </div>
-        <div>
-            <button onclick="window.location.href='/submit_form'">Go to Submit Repair Information</button>
         </div>
         <div class="chart">
             <div id="chart"></div>
@@ -34,13 +32,25 @@
             <br>
             Accuracy: <span id="accuracy">0%</span>
         </div>
+        <div>
+            <button id="submitButton">Submit Repair Information</button>
+        </div>
     </div>
 
     <script>
         var layout = {
             title: 'Probe Temperature',
-            xaxis: { title: 'Timestamp' },
-            yaxis: { title: 'Probe Temp' },
+            xaxis: { 
+                title: { 
+                    text: 'Timestamp', 
+                    standoff: 40 
+                },
+                tickformat: "%m-%d-%Y %H:%M:%S",
+                tickangle: -45,
+                automargin: true
+            },
+            yaxis: { title: 'Probe Temp (' + '&deg;C' + ')' },
+            margin: { l: 50, r: 50, b: 100, t: 50, pad: 4 }
         };
 
         function updatePlot() {
@@ -77,12 +87,16 @@
                 Plotly.newPlot(plotDiv, dataPlot, layout);
 
                 document.getElementById('faultyComponent').innerText = data.faulty_component;
-                document.getElementById('accuracy').innerText = data.accuracy;
+                document.getElementById('accuracy').innerText = data.accuracy + '%';
             });
         }
 
         $(document).ready(function() {
-            setInterval(updatePlot, 10000);
+            setInterval(updatePlot, 100);
+
+            $('#submitButton').on('click', function() {
+                window.location.href = '/submit_form';
+            });
         });
     </script>
 </body>
