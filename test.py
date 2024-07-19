@@ -4,7 +4,7 @@ from sklearn.preprocessing import MinMaxScaler
 from tensorflow import keras
 from keras._tf_keras.keras.models import load_model, Sequential
 from keras._tf_keras.keras.utils import to_categorical
-from keras._tf_keras.keras.layers import LSTM, Dropout, Dense
+from keras._tf_keras.keras.layers import LSTM, Dropout, Dense, SimpleRNN
 from keras._tf_keras.keras.optimizers import Adam
 from keras._tf_keras.keras.regularizers import l2
 from datetime import datetime, timedelta
@@ -20,10 +20,13 @@ model = load_model('LSTM.keras')
 scaler = None
 df_combined = pd.read_csv('output.csv')  # Initial combined data
 component_file = 'components.txt'
+alert1 = False
+alert2 = False
+alert3 = False
 
 # Initialize the start timestamp to the current time
 start_timestamp = datetime.now()
-#start_timestamp = datetime(year=2024, month=7, day=16, hour=19, minute=2, second=57)
+start_timestamp = datetime(year=2024, month=7, day=19, hour=7, minute=55, second=35)
 
 # CSV file to store anomalies for each component
 anomalies_csv = 'component_anomalies.csv'
@@ -40,9 +43,9 @@ def expand_model(old_model, num_classes):
     
     # Create a new model with the same architecture but expanded output layer
     new_model = Sequential()
-    new_model.add(LSTM(50, return_sequences=True, input_shape=(1, 1), kernel_regularizer=l2(0.001)))
+    new_model.add(SimpleRNN(50, return_sequences=True, input_shape=(1, 1), kernel_regularizer=l2(0.001)))
     new_model.add(Dropout(0.2))
-    new_model.add(LSTM(50, return_sequences=False, kernel_regularizer=l2(0.001)))
+    new_model.add(SimpleRNN(50, return_sequences=False, kernel_regularizer=l2(0.001)))
     new_model.add(Dropout(0.2))
     new_model.add(Dense(num_classes, activation='softmax', kernel_regularizer=l2(0.001)))
     
@@ -108,7 +111,7 @@ def add_new_data():
             'Acceleration_X': [0], 'Acceleration_Y': [0], 'Acceleration_Z': [0], 'Altitude': [0],
             'Ambient_Temp': [0], 'GPS_Fix': [0], 'Humidity': [0], 'Infrared': [0], 'Latitude': [0],
             'Light': [0], 'Longitude': [0], 'Magnetometer_X': [0], 'Magnetometer_Y': [0], 'Magnetometer_Z': [0],
-            'Probe_Temp': [round(random.uniform(16, 20), 2)], 'Visible': [0]
+            'Probe_Temp': [round(random.uniform(16, 17), 2)], 'Visible': [0], 'Voltage': [0]
         }
         df_new = pd.DataFrame(new_record)
         df_new.to_csv('new_data.csv', mode='a', header=False, index=False)
@@ -134,7 +137,7 @@ def index():
 
 @app.route('/data')
 def data():
-    global df_combined, model
+    global df_combined, model, alert1, alert2, alert3
 
     # Load the component list
     component_labels = load_components()
@@ -145,13 +148,13 @@ def data():
     timestamps_combined = df_combined['Timestamp'].dt.strftime('%m/%d/%Y %H:%M:%S')
     data_combined = df_combined[['Probe_Temp']].values
 
-    X_combined, y_combined, ts_combined = create_dataset(data_combined, timestamps_combined)
-    temp_values = data_combined[:, 0]
-
     with open('threshold.txt', 'r') as f:
         temp_threshold = float(f.read())
+
+    # Anomaly detection on the entire dataset
+    temp_values = data_combined.flatten()
     temp_highs = temp_values > temp_threshold
-    temp_anomaly_timestamps = np.array(ts_combined)[temp_highs]
+    temp_anomaly_timestamps = np.array(timestamps_combined)[temp_highs]
 
     window_size = 60
     tolerance = 5
@@ -162,58 +165,64 @@ def data():
         if np.sum(temp_highs[i:i + window_size] & (window_values > temp_threshold)) >= (window_size - tolerance):
             sustained_anomalies[i:i + window_size] = (window_values > temp_threshold)
 
-    # Check if all values in the last hour are below the threshold
-    last_hour = df_combined[df_combined['Timestamp'] >= df_combined['Timestamp'].max() - timedelta(hours=1)]
-    if last_hour.empty or (last_hour['Probe_Temp'] <= temp_threshold).all():
-        return jsonify({
-            'timestamps': timestamps_combined.tolist(),
-            'y_inv': temp_values.tolist(),
-            'temp_anomaly_timestamps': temp_anomaly_timestamps.tolist(),
-            'y_temp_highs': temp_values[temp_highs].tolist(),
-            'sustained_anomaly_timestamps': [],
-            'y_sustained_anomalies': [],
-            'temp_threshold': temp_threshold,
-            'faulty_component': "None",
-            'accuracy': 0.0
-        })
+    sustained_anomaly_timestamps = np.array(timestamps_combined)[sustained_anomalies]
+
+    # Prediction on the last hour of data
+    last_day_df = df_combined[df_combined['Timestamp'] >= df_combined['Timestamp'].max() - timedelta(days=1)]
+    last_day_data = last_day_df[['Probe_Temp']].values
+
+    last_hour_df = df_combined[df_combined['Timestamp'] >= df_combined['Timestamp'].max() - timedelta(hours=1)]
+    last_hour_timestamps = last_hour_df['Timestamp'].dt.strftime('%m/%d/%Y %H:%M:%S')
+    last_hour_data = last_hour_df[['Probe_Temp']].values
 
     faulty_component = "None"
     accuracy = 0.0
 
-    if len(data_combined) == len(sustained_anomalies):
-        X_sustained = data_combined[sustained_anomalies].reshape(-1, 1, 1)
-        if X_sustained.size > 0:
-            temp_diffs = X_sustained - temp_threshold
-            X_sustained_diff = temp_diffs.reshape(-1, 1, 1)
-            print(X_sustained_diff)
+    if not last_hour_df.empty and (last_hour_data > temp_threshold).any():
+        temp_values_last_hour = last_hour_data.flatten()
+        temp_highs_last_hour = temp_values_last_hour > temp_threshold
 
-            predictions = model.predict(X_sustained_diff)
-            print(f"Predictions shape: {predictions.shape}")
-            print(f"Predictions: {predictions}")
-
-            num_classes = predictions.shape[1]
-            if num_classes > 0:
-                faulty_component_idx = np.argmax(predictions, axis=1)  # Get index of max value per sample
-                print(f"Faulty component indices: {faulty_component_idx}")
-                most_common_idx = np.bincount(faulty_component_idx).argmax()
-                if 0 <= most_common_idx < len(component_labels):
-                    faulty_component = component_labels[most_common_idx]
-                    accuracy = round(np.mean(np.max(predictions, axis=1)) * 100, 2)
-                    if abs(accuracy - (100 / len(component_labels))) < 5:
-                        faulty_component = "Unknown"
-                        accuracy = 0.0
-                    else:
-                        print(f"Predicted faulty component: {faulty_component} with accuracy {accuracy}%")
-                else:
-                    print(f"Invalid most_common_idx: {most_common_idx}, predictions: {predictions}")
+        if len(last_hour_data) == len(temp_highs_last_hour):
+            X_sustained_last_hour = last_hour_data[temp_highs_last_hour].reshape(-1, 1, 1)
+            print(X_sustained_last_hour.size)
+            if X_sustained_last_hour.size == 30:
+                alert1 = True
+                alert2 = False
+            elif X_sustained_last_hour.size == 60:
+                alert2 = True
+                alert1 = False
             else:
-                print("Predictions do not match expected shape for any classes.")
-        else:
-            print("Empty X_sustained array.")
-    else:
-        print("Mismatch in lengths between data_combined and sustained_anomalies.")
+                alert1 = False
+                alert2 = False
+            if X_sustained_last_hour.size > 60:
+                temp_diffs_last_hour = X_sustained_last_hour - temp_threshold
+                X_sustained_diff_last_hour = temp_diffs_last_hour.reshape(-1, 1, 1)
 
-    sustained_anomaly_timestamps = np.array(ts_combined)[sustained_anomalies]
+                predictions = model.predict(X_sustained_diff_last_hour)
+                print(f"Predictions shape: {predictions.shape}")
+                print(f"Predictions: {predictions}")
+
+                num_classes = predictions.shape[1]
+                if num_classes > 0:
+                    faulty_component_idx = np.argmax(predictions, axis=1)  # Get index of max value per sample
+                    print(f"Faulty component indices: {faulty_component_idx}")
+                    most_common_idx = np.bincount(faulty_component_idx).argmax()
+                    if 0 <= most_common_idx < len(component_labels):
+                        faulty_component = component_labels[most_common_idx]
+                        accuracy = round(np.mean(np.max(predictions, axis=1)) * 100, 2)
+                        if accuracy < 50:
+                            faulty_component = "Unknown"
+                            accuracy = 0.0
+                        else:
+                            print(f"Predicted faulty component: {faulty_component} with accuracy {accuracy}%")
+                    else:
+                        print(f"Invalid most_common_idx: {most_common_idx}, predictions: {predictions}")
+                else:
+                    print("Predictions do not match expected shape for any classes.")
+            else:
+                print("Empty X_sustained array.")
+        else:
+            print("Mismatch in lengths between data_combined and sustained_anomalies.")
 
     return jsonify({
         'timestamps': timestamps_combined.tolist(),
@@ -224,9 +233,11 @@ def data():
         'y_sustained_anomalies': temp_values[sustained_anomalies].tolist(),
         'temp_threshold': temp_threshold,
         'faulty_component': faulty_component,
-        'accuracy': accuracy
+        'accuracy': accuracy,
+        'alert1' : alert1,
+        'alert2' : alert2,
+        'alert3' : alert3
     })
-
 
 @app.route('/get_components')
 def get_components():
@@ -288,8 +299,12 @@ def submit():
 
         anomalies_data_diff = anomalies_before_repair[['Probe_Temp']].values - temp_threshold
 
+        avg = np.mean(anomalies_data_diff)
+
+        avg_sample = np.array([[avg]])
+
         # Prepare data for training
-        X_train = anomalies_data_diff[:, 0].reshape(-1, 1, 1)  # Adjusting shape for LSTM input
+        X_train = anomalies_data_diff.reshape(-1, 1)
         print(X_train)
 
         # Update component_labels dynamically

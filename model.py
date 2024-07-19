@@ -1,6 +1,6 @@
 from tensorflow import keras
 from keras._tf_keras.keras.models import Sequential
-from keras._tf_keras.keras.layers import LSTM, Dense, Dropout
+from keras._tf_keras.keras.layers import LSTM, Dense, Dropout, SimpleRNN
 from keras._tf_keras.keras.optimizers import Adam
 from keras._tf_keras.keras.regularizers import l2
 import pandas as pd
@@ -23,14 +23,14 @@ def update_combined_data():
         df_new = pd.DataFrame()
 
 model = Sequential()
-model.add(LSTM(50, return_sequences=True, input_shape=(1, 1), kernel_regularizer=l2(0.001)))
-model.add(Dropout(0.2))
-model.add(LSTM(50, return_sequences=False, kernel_regularizer=l2(0.001)))
-model.add(Dropout(0.2))
-model.add(Dense(4, activation='softmax', kernel_regularizer=l2(0.001)))
+model.add(SimpleRNN(50, return_sequences=True, input_shape=(1, 1), kernel_regularizer=l2(0.01)))
+model.add(Dropout(0.5))
+model.add(SimpleRNN(50, return_sequences=False, kernel_regularizer=l2(0.01)))
+model.add(Dropout(0.5))
+model.add(Dense(4, activation='softmax', kernel_regularizer=l2(0.01)))
 
 # Compile the model
-model.compile(optimizer=Adam(learning_rate=0.001), loss='categorical_crossentropy', metrics=['accuracy'])
+model.compile(optimizer=Adam(learning_rate=0.0001), loss='categorical_crossentropy', metrics=['accuracy'])
 
 model.save('LSTM.keras')
 

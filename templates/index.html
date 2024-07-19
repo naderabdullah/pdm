@@ -28,7 +28,7 @@
             <div id="chart"></div>
         </div>
         <div class="faulty-component">
-            Possible Faulty Component: <span id="faultyComponent">None</span>
+            Possible Faulty Component/Problem: <span id="faultyComponent">None</span>
             <br>
             Accuracy: <span id="accuracy">0%</span>
         </div>
@@ -88,11 +88,17 @@
 
                 document.getElementById('faultyComponent').innerText = data.faulty_component;
                 document.getElementById('accuracy').innerText = data.accuracy + '%';
+
+                if (data.alert1) {
+                    alert("High temperatures detected! Notifying Customer and providing necessary steps.");
+                } else if (data.alert2) {
+                    alert("High temperatures sustained. Resetting sensors.");
+                }
             });
         }
 
         $(document).ready(function() {
-            setInterval(updatePlot, 100);
+            setInterval(updatePlot, 250);
 
             $('#submitButton').on('click', function() {
                 window.location.href = '/submit_form';
