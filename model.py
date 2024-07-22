@@ -23,7 +23,7 @@ def update_combined_data():
         df_new = pd.DataFrame()
 
 model = Sequential()
-model.add(SimpleRNN(50, return_sequences=True, input_shape=(1, 1), kernel_regularizer=l2(0.01)))
+model.add(SimpleRNN(50, return_sequences=True, input_shape=(1, 2), kernel_regularizer=l2(0.01)))
 model.add(Dropout(0.5))
 model.add(SimpleRNN(50, return_sequences=False, kernel_regularizer=l2(0.01)))
 model.add(Dropout(0.5))

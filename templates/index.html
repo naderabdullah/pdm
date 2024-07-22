@@ -25,7 +25,8 @@
             <h1>Predictive Maintenance Dashboard</h1>
         </div>
         <div class="chart">
-            <div id="chart"></div>
+            <div id="temp_chart"></div>
+            <div id="voltage_chart"></div>
         </div>
         <div class="faulty-component">
             Possible Faulty Component/Problem: <span id="faultyComponent">None</span>
@@ -38,7 +39,7 @@
     </div>
 
     <script>
-        var layout = {
+        var tempLayout = {
             title: 'Probe Temperature',
             xaxis: { 
                 title: { 
@@ -53,11 +54,26 @@
             margin: { l: 50, r: 50, b: 100, t: 50, pad: 4 }
         };
 
+        var voltageLayout = {
+            title: 'Voltage Sensor',
+            xaxis: { 
+                title: { 
+                    text: 'Timestamp', 
+                    standoff: 40 
+                },
+                tickformat: "%m-%d-%Y %H:%M:%S",
+                tickangle: -45,
+                automargin: true
+            },
+            yaxis: { title: 'Voltage (V)' },
+            margin: { l: 50, r: 50, b: 100, t: 50, pad: 4 }
+        };
+
         function updatePlot() {
             $.getJSON('/data', function(data) {
                 var trace1 = {
                     x: data.timestamps,
-                    y: data.y_inv,
+                    y: data.y_temp,
                     mode: 'lines',
                     name: 'Actual'
                 };
@@ -81,10 +97,32 @@
                     mode: 'lines',
                     name: 'Threshold',
                     line: { color: 'red', dash: 'dash' }
-                }
+                };
                 var dataPlot = [trace1, trace2, trace3, trace4];
-                var plotDiv = document.getElementById('chart');
-                Plotly.newPlot(plotDiv, dataPlot, layout);
+                Plotly.newPlot('temp_chart', dataPlot, tempLayout);
+
+                var voltageTrace1 = {
+                    x: data.timestamps,
+                    y: data.y_voltage,
+                    mode: 'lines',
+                    name: 'Actual Voltage'
+                };
+                var voltageTrace2 = {
+                    x: data.voltage_anomaly_timestamps,
+                    y: data.y_voltage_lows,
+                    mode: 'markers',
+                    name: 'Voltage Lows',
+                    marker: { color: 'orange' }
+                };
+                var voltageTrace3 = {
+                    x: data.timestamps,
+                    y: Array(data.timestamps.length).fill(data.voltage_threshold),
+                    mode: 'lines',
+                    name: 'Threshold',
+                    line: { color: 'red', dash: 'dash' }
+                }
+                var voltageDataPlot = [voltageTrace1, voltageTrace2, voltageTrace3];
+                Plotly.newPlot('voltage_chart', voltageDataPlot, voltageLayout);
 
                 document.getElementById('faultyComponent').innerText = data.faulty_component;
                 document.getElementById('accuracy').innerText = data.accuracy + '%';
@@ -92,13 +130,15 @@
                 if (data.alert1) {
                     alert("High temperatures detected! Notifying Customer and providing necessary steps.");
                 } else if (data.alert2) {
+                    alert("Voltage low. Resetting system.");
+                } else if (data.alert3) {
                     alert("High temperatures sustained. Resetting sensors.");
                 }
             });
         }
 
         $(document).ready(function() {
-            setInterval(updatePlot, 250);
+            setInterval(updatePlot, 10000);
 
             $('#submitButton').on('click', function() {
                 window.location.href = '/submit_form';

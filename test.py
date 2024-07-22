@@ -43,7 +43,7 @@ def expand_model(old_model, num_classes):
     
     # Create a new model with the same architecture but expanded output layer
     new_model = Sequential()
-    new_model.add(SimpleRNN(50, return_sequences=True, input_shape=(1, 1), kernel_regularizer=l2(0.001)))
+    new_model.add(SimpleRNN(50, return_sequences=True, input_shape=(1, 2), kernel_regularizer=l2(0.001)))
     new_model.add(Dropout(0.2))
     new_model.add(SimpleRNN(50, return_sequences=False, kernel_regularizer=l2(0.001)))
     new_model.add(Dropout(0.2))
@@ -111,7 +111,7 @@ def add_new_data():
             'Acceleration_X': [0], 'Acceleration_Y': [0], 'Acceleration_Z': [0], 'Altitude': [0],
             'Ambient_Temp': [0], 'GPS_Fix': [0], 'Humidity': [0], 'Infrared': [0], 'Latitude': [0],
             'Light': [0], 'Longitude': [0], 'Magnetometer_X': [0], 'Magnetometer_Y': [0], 'Magnetometer_Z': [0],
-            'Probe_Temp': [round(random.uniform(16, 17), 2)], 'Visible': [0], 'Voltage': [0]
+            'Probe_Temp': [round(random.uniform(16, 17), 2)], 'Visible': [0], 'Voltage': [round(random.uniform(4.5, 5.5), 2)]
         }
         df_new = pd.DataFrame(new_record)
         df_new.to_csv('new_data.csv', mode='a', header=False, index=False)
@@ -139,29 +139,36 @@ def index():
 def data():
     global df_combined, model, alert1, alert2, alert3
 
+    df_combined = pd.read_csv('new_data.csv')
+
     # Load the component list
     component_labels = load_components()
 
-    update_combined_data()
+    #update_combined_data()
 
     df_combined['Timestamp'] = pd.to_datetime(df_combined['Timestamp'])
     timestamps_combined = df_combined['Timestamp'].dt.strftime('%m/%d/%Y %H:%M:%S')
-    data_combined = df_combined[['Probe_Temp']].values
+    data_combined = df_combined[['Probe_Temp', 'Voltage']].values
 
     with open('threshold.txt', 'r') as f:
         temp_threshold = float(f.read())
 
+    voltage_threshold = 4.65
+
     # Anomaly detection on the entire dataset
-    temp_values = data_combined.flatten()
+    temp_values = data_combined[:, 0]
+    voltage_values = data_combined[:, 1]
     temp_highs = temp_values > temp_threshold
+    voltage_lows = voltage_values < voltage_threshold
     temp_anomaly_timestamps = np.array(timestamps_combined)[temp_highs]
+    voltage_anomaly_timestamps = np.array(timestamps_combined)[voltage_lows]
 
     window_size = 60
     tolerance = 5
     sustained_anomalies = np.zeros_like(temp_highs, dtype=bool)
 
     for i in range(len(temp_highs) - window_size + 1):
-        window_values = data_combined[i:i + window_size].flatten()
+        window_values = data_combined[i:i + window_size, 0].flatten()
         if np.sum(temp_highs[i:i + window_size] & (window_values > temp_threshold)) >= (window_size - tolerance):
             sustained_anomalies[i:i + window_size] = (window_values > temp_threshold)
 
@@ -173,30 +180,33 @@ def data():
 
     last_hour_df = df_combined[df_combined['Timestamp'] >= df_combined['Timestamp'].max() - timedelta(hours=1)]
     last_hour_timestamps = last_hour_df['Timestamp'].dt.strftime('%m/%d/%Y %H:%M:%S')
-    last_hour_data = last_hour_df[['Probe_Temp']].values
+    last_hour_data = last_hour_df[['Probe_Temp', 'Voltage']].values
 
     faulty_component = "None"
     accuracy = 0.0
 
-    if not last_hour_df.empty and (last_hour_data > temp_threshold).any():
-        temp_values_last_hour = last_hour_data.flatten()
+    if not last_hour_df.empty and ((last_hour_data[:, 0] > temp_threshold).any() or (last_hour_data[:, 1] < voltage_threshold).any()):
+        temp_values_last_hour = last_hour_data[:, 0]
+        voltage_values_last_hour = last_hour_data[:, 1]
         temp_highs_last_hour = temp_values_last_hour > temp_threshold
+        voltage_lows_last_hour = voltage_values_last_hour < voltage_threshold
 
-        if len(last_hour_data) == len(temp_highs_last_hour):
-            X_sustained_last_hour = last_hour_data[temp_highs_last_hour].reshape(-1, 1, 1)
+        if len(last_hour_data) == len(temp_highs_last_hour) and len(last_hour_data) == len(voltage_lows_last_hour):
+            X_sustained_last_hour = last_hour_data[temp_highs_last_hour | voltage_lows_last_hour].reshape(-1, 1, 2)
             print(X_sustained_last_hour.size)
-            if X_sustained_last_hour.size == 30:
+            if temp_highs_last_hour.size == 30:
                 alert1 = True
-                alert2 = False
-            elif X_sustained_last_hour.size == 60:
+            elif voltage_lows_last_hour.size == 60:
                 alert2 = True
-                alert1 = False
+            elif temp_highs_last_hour.size == 60:
+                alert3 = True
             else:
                 alert1 = False
                 alert2 = False
+                alert3 = False
             if X_sustained_last_hour.size > 60:
-                temp_diffs_last_hour = X_sustained_last_hour - temp_threshold
-                X_sustained_diff_last_hour = temp_diffs_last_hour.reshape(-1, 1, 1)
+                diffs_last_hour = X_sustained_last_hour - [temp_threshold, voltage_threshold]
+                X_sustained_diff_last_hour = diffs_last_hour.reshape(-1, 1, 2)
 
                 predictions = model.predict(X_sustained_diff_last_hour)
                 print(f"Predictions shape: {predictions.shape}")
@@ -226,16 +236,20 @@ def data():
 
     return jsonify({
         'timestamps': timestamps_combined.tolist(),
-        'y_inv': temp_values.tolist(),
+        'y_temp': temp_values.tolist(),
+        'y_voltage': voltage_values.tolist(),
         'temp_anomaly_timestamps': temp_anomaly_timestamps.tolist(),
+        'voltage_anomaly_timestamps': voltage_anomaly_timestamps.tolist(),
         'y_temp_highs': temp_values[temp_highs].tolist(),
+        'y_voltage_lows': voltage_values[voltage_lows].tolist(),
         'sustained_anomaly_timestamps': sustained_anomaly_timestamps.tolist(),
         'y_sustained_anomalies': temp_values[sustained_anomalies].tolist(),
         'temp_threshold': temp_threshold,
+        'voltage_threshold': voltage_threshold,
         'faulty_component': faulty_component,
         'accuracy': accuracy,
         'alert1' : alert1,
-        'alert2' : alert2,
+        'alert2': alert2,
         'alert3' : alert3
     })
 
@@ -297,14 +311,16 @@ def submit():
         with open('threshold.txt', 'r') as f:
             temp_threshold = float(f.read())
 
-        anomalies_data_diff = anomalies_before_repair[['Probe_Temp']].values - temp_threshold
+        voltage_threshold = 4.65
+
+        anomalies_data_diff = anomalies_before_repair[['Probe_Temp', 'Voltage']].values - [temp_threshold, voltage_threshold]
 
         avg = np.mean(anomalies_data_diff)
 
         avg_sample = np.array([[avg]])
 
         # Prepare data for training
-        X_train = anomalies_data_diff.reshape(-1, 1)
+        X_train = anomalies_data_diff.reshape(-1, 1, 2)
         print(X_train)
 
         # Update component_labels dynamically
