@@ -9,7 +9,7 @@ from keras._tf_keras.keras.optimizers import Adam
 from keras._tf_keras.keras.regularizers import l2
 from datetime import datetime, timedelta
 import plotly.graph_objs as go
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, send_from_directory
 import time
 import threading
 import random
@@ -134,6 +134,10 @@ def update_combined_data():
 def index():
     update_combined_data()
     return render_template('index.html')
+
+@app.route('/static/<path:path>')
+def send_static(path):
+    return send_from_directory('static', path)
 
 @app.route('/data')
 def data():
