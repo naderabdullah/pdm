@@ -28,6 +28,7 @@
         <div class="chart">
             <div id="temp_chart"></div>
             <div id="voltage_chart"></div>
+            <div id="board_voltage_chart"></div>
         </div>
         <div class="faulty-component">
             Possible Faulty Component/Problem: <span id="faultyComponent">None</span>
@@ -51,12 +52,27 @@
                 tickangle: -45,
                 automargin: true
             },
-            yaxis: { title: 'Probe Temp (' + '&deg;C' + ')' },
+            yaxis: { title: 'Probe Temp (' + '&deg;F' + ')' },
             margin: { l: 50, r: 50, b: 100, t: 50, pad: 4 }
         };
 
         var voltageLayout = {
-            title: 'Voltage Sensor',
+            title: 'Compressor Voltage Sensor',
+            xaxis: { 
+                title: { 
+                    text: 'Time', 
+                    standoff: 40 
+                },
+                tickformat: "%m-%d-%Y %H:%M:%S",
+                tickangle: -45,
+                automargin: true
+            },
+            yaxis: { title: 'Voltage (V)' },
+            margin: { l: 50, r: 50, b: 100, t: 50, pad: 4 }
+        };
+
+        var boardVoltageLayout = {
+            title: 'Board Voltage Sensor',
             xaxis: { 
                 title: { 
                     text: 'Time', 
@@ -125,21 +141,46 @@
                 var voltageDataPlot = [voltageTrace1, voltageTrace2, voltageTrace3];
                 Plotly.newPlot('voltage_chart', voltageDataPlot, voltageLayout);
 
+                var boardVoltageTrace1 = {
+                    x: data.timestamps,
+                    y: data.y_board_voltage,
+                    mode: 'lines',
+                    name: 'Voltage'
+                };
+                var boardVoltageTrace2 = {
+                    x: data.voltage_anomaly_timestamps,
+                    y: data.y_board_voltage_lows,
+                    mode: 'markers',
+                    name: 'Voltage Lows',
+                    marker: { color: 'orange' }
+                };
+                var boardVoltageTrace3 = {
+                    x: data.timestamps,
+                    y: Array(data.timestamps.length).fill(data.board_voltage_threshold),
+                    mode: 'lines',
+                    name: 'Threshold',
+                    line: { color: 'red', dash: 'dash' }
+                }
+                var boardVoltageDataPlot = [boardVoltageTrace1, boardVoltageTrace2, boardVoltageTrace3];
+                Plotly.newPlot('board_voltage_chart', boardVoltageDataPlot, boardVoltageLayout);
+
                 document.getElementById('faultyComponent').innerText = data.faulty_component;
                 document.getElementById('accuracy').innerText = data.accuracy + '%';
 
                 if (data.alert1) {
-                    alert("High temperatures detected! Notifying Customer and providing necessary steps.");
+                    alert("High temperatures detected! Notifying customer and providing necessary steps.");
                 } else if (data.alert2) {
-                    alert("Voltage low. Resetting system.");
+                    alert("Board voltage low. Resetting system.");
                 } else if (data.alert3) {
-                    alert("High temperatures sustained. Resetting sensors.");
+                    alert("High temperatures sustained. Resetting system and notifying customer.");
+                } else if (data.alert4) {
+                    alert("Compressor voltage low. Notifying customer. Technician may be needed.");
                 }
             });
         }
 
         $(document).ready(function() {
-            setInterval(updatePlot, 10000);
+            setInterval(updatePlot, 500);
 
             $('#submitButton').on('click', function() {
                 window.location.href = '/submit_form';
