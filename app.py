@@ -7,6 +7,7 @@ from keras._tf_keras.keras.utils import to_categorical
 from keras._tf_keras.keras.layers import LSTM, Dropout, Dense, SimpleRNN
 from keras._tf_keras.keras.optimizers import Adam
 from keras._tf_keras.keras.regularizers import l2
+from keras._tf_keras.keras.callbacks import TensorBoard
 from datetime import datetime, timedelta
 import plotly.graph_objs as go
 from flask import Flask, jsonify, render_template, request, send_from_directory
@@ -18,6 +19,9 @@ import board
 import digitalio
 import adafruit_max31865
 from adafruit_ina219 import ADCResolution, BusVoltageRange, INA219
+
+log_dir = "logs/fit/" + datetime.now().strftime("%Y%m%d-%H%M%S")
+tensorboard_callback = TensorBoard(log_dir=log_dir, histogram_freq=1)
 
 app = Flask(__name__)
 model = load_model('LSTM.keras')
@@ -361,7 +365,7 @@ def submit():
             model = expand_model(model, len(component_labels))
         
         # Train the model with the anomalies and their corresponding faulty component
-        model.fit(X_train, y_train, epochs=15, batch_size=32, verbose=1)
+        model.fit(X_train, y_train, epochs=15, batch_size=32, verbose=1, callbacks=[tensorboard_callback])
         
         # Save updated model
         model.save('LSTM.keras')
