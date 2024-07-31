@@ -7,7 +7,6 @@ from keras._tf_keras.keras.utils import to_categorical
 from keras._tf_keras.keras.layers import LSTM, Dropout, Dense, SimpleRNN
 from keras._tf_keras.keras.optimizers import Adam
 from keras._tf_keras.keras.regularizers import l2
-from keras._tf_keras.keras.callbacks import TensorBoard
 from datetime import datetime, timedelta
 import plotly.graph_objs as go
 from flask import Flask, jsonify, render_template, request, send_from_directory
@@ -15,25 +14,25 @@ import time
 import threading
 import random
 import os
-"""
 import board
 import digitalio
 import adafruit_max31865
 from adafruit_ina219 import ADCResolution, BusVoltageRange, INA219
-"""
 
 app = Flask(__name__)
 model = load_model('LSTM.keras')
 scaler = None
 df_combined = pd.read_csv('output.csv')  # Initial combined data
 component_file = 'components.txt'
+spi = board.SPI()
+cs = digitalio.DigitalInOut(board.D6)
+max31855 = adafruit_max31865.MAX31865(spi, cs)
+i2c_bus = board.I2C()
+ina219 = INA219(i2c_bus, 0x41)
 alert1 = False
 alert2 = False
 alert3 = False
 alert4 = False
-
-log_dir = "logs/fit/" + datetime.now().strftime("%m%d%Y-%H%M%S")
-tensorboard_callback = TensorBoard(log_dir=log_dir, histogram_freq=1)
 
 # Initialize the start timestamp to the current time
 start_timestamp = datetime.now()
@@ -113,8 +112,8 @@ def add_new_data():
         'Acceleration_X': [0], 'Acceleration_Y': [0], 'Acceleration_Z': [0], 'Altitude': [0],
         'Ambient_Temp': [0], 'GPS_Fix': [0], 'Humidity': [0], 'Infrared': [0], 'Latitude': [0],
         'Light': [0], 'Longitude': [0], 'Magnetometer_X': [0], 'Magnetometer_Y': [0], 'Magnetometer_Z': [0],
-        'Probe_Temp': [round(random.uniform(75, 75.1), 3)], 'Visible': [0], 
-        'board_voltage': [round(random.uniform(5.128, 5.13), 3)], 'Compressor_Voltage': [round(random.uniform(95, 95.1), 3)]
+        'Probe_Temp': [round(max31855.temperature * 9 / 5 + 32, 3)], 'Visible': [0], 
+        'board_voltage': [round(ina219.bus_voltage + ina219.shunt_voltage, 3)], 'Compressor_Voltage': [round(random.uniform(119, 121), 3)]
     }
     df_new = pd.DataFrame(new_record)
     df_new.to_csv('new_data.csv', mode='a', header=False, index=False)
@@ -143,7 +142,7 @@ def send_static(path):
 
 @app.route('/data')
 def data():
-    global df_combined, model, alert1, alert2, alert3, alert4, replay_buffer
+    global df_combined, model, alert1, alert2, alert3, alert4
 
     df_combined = pd.read_csv('new_data.csv')
     add_new_data()
@@ -206,21 +205,20 @@ def data():
 
         if len(last_hour_data) == len(temp_highs_last_hour) and len(last_hour_data) == len(board_voltage_lows_last_hour) and len(last_hour_data) == len(voltage_lows_last_hour):
             X_sustained_last_hour = last_hour_data[temp_highs_last_hour | board_voltage_lows_last_hour | voltage_lows_last_hour].reshape(-1, 1, 3)
-            print(X_sustained_last_hour.size)
             if all(temp_highs_last_hour) == True and temp_highs_last_hour.size == 30:
                 alert1 = True
             elif all(board_voltage_lows_last_hour) == True and board_voltage_lows_last_hour.size == 60:
                 alert2 = True
             elif all(temp_highs_last_hour) == True and temp_highs_last_hour.size == 60:
                 alert3 = True
-            elif all(voltage_lows_last_hour) == True and voltage_lows_last_hour.size == 45:
+            elif all(voltage_lows_last_hour) == True and voltage_lows_last_hour.size == 60:
                 alert4 = True
             else:
                 alert1 = False
                 alert2 = False
                 alert3 = False
                 alert4 = False
-            if X_sustained_last_hour.size / 3 > 60:
+            if X_sustained_last_hour.size > 60:
                 diffs_last_hour = X_sustained_last_hour - [temp_threshold, board_voltage_threshold, voltage_threshold]
                 X_sustained_diff_last_hour = diffs_last_hour.reshape(-1, 1, 3)
 
@@ -246,7 +244,7 @@ def data():
                 else:
                     print("Predictions do not match expected shape for any classes.")
             else:
-                print("X_sustained array not long enough.")
+                print("Empty X_sustained array.")
         else:
             print("Mismatch in lengths between data_combined and sustained_anomalies.")
 
@@ -363,8 +361,8 @@ def submit():
             model = expand_model(model, len(component_labels))
         
         # Train the model with the anomalies and their corresponding faulty component
-        model.fit(X_train, y_train, epochs=15, batch_size=32, verbose=1, callbacks=[tensorboard_callback])
-
+        model.fit(X_train, y_train, epochs=15, batch_size=32, verbose=1)
+        
         # Save updated model
         model.save('LSTM.keras')
         print('Supervised model trained and saved.')
