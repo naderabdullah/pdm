@@ -2,7 +2,7 @@ from flask import Flask, jsonify, render_template, request, send_from_directory
 from datetime import datetime, timedelta
 import pandas as pd
 from data_module import update_combined_data, add_new_data, normalize_data, load_components, save_component, expand_model, detect_anomalies, predict_faulty_component, prepare_training_data
-from sensor_module import get_sensor_data #initialize_sensors
+from sensor_module import get_sensor_data, initialize_sensors
 from model_module import load_trained_model, train_model
 
 app = Flask(__name__)
@@ -13,9 +13,6 @@ df_combined = pd.read_csv('new_data.csv')
 start_timestamp = datetime.now()
 scaler = None
 alert1 = alert2 = alert3 = alert4 = False
-
-# Initialize sensors
-#spi, cs, max31855, i2c_bus, ina219 = initialize_sensors()
 
 @app.route('/')
 def index():

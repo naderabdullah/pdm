@@ -9,11 +9,15 @@ from keras._tf_keras.keras.regularizers import l2
 from keras._tf_keras.keras.optimizers import Adam
 from keras._tf_keras.keras.utils import to_categorical
 import random
-#import adafruit_max31865
-#from adafruit_ina219 import ADCResolution, BusVoltageRange, INA219
+from sensor_module import initialize_sensors
+import adafruit_max31865
+from adafruit_ina219 import ADCResolution, BusVoltageRange, INA219
 
 component_file = 'components.txt'
 scaler = None
+
+# Initialize sensors
+spi, cs, max31865, i2c_bus, ina219 = initialize_sensors()
 
 def normalize_data(df, scaler=None):
     df['Timestamp'] = pd.to_datetime(df['Timestamp'])
@@ -81,9 +85,10 @@ def add_new_data(time):
         'Acceleration_X': [0], 'Acceleration_Y': [0], 'Acceleration_Z': [0], 'Altitude': [0],
         'Ambient_Temp': [0], 'GPS_Fix': [0], 'Humidity': [0], 'Infrared': [0], 'Latitude': [0],
         'Light': [0], 'Longitude': [0], 'Magnetometer_X': [0], 'Magnetometer_Y': [0], 'Magnetometer_Z': [0],
-        'Probe_Temp': [round(random.uniform(72.1, 72.3), 3)], 'Visible': [0], 
-        'Board_voltage': [round(random.uniform(5, 5.2), 3)], 'Compressor_Voltage': [round(random.uniform(119, 121), 3)]
+        'Probe_Temp': [round(max31865.temperature * 9 / 5 + 32, 3)], 'Visible': [0], 
+        'Board_voltage': [round(ina219.bus_voltage + ina219.shunt_voltage, 3)], 'Compressor_Voltage': [round(random.uniform(119, 121), 3)]
     }
+
     df_new = pd.DataFrame(new_record)
     df_new.to_csv('new_data.csv', mode='a', header=False, index=False)
     start_timestamp = new_timestamp
