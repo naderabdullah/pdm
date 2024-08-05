@@ -181,7 +181,7 @@ def predict_faulty_component(data_combined, component_labels, model, temp_thresh
             if 0 <= most_common_idx < len(component_labels):
                 faulty_component = component_labels[most_common_idx]
                 accuracy = round(np.mean(np.max(predictions, axis=1)) * 100, 2)
-                if accuracy < 50:
+                if accuracy < 65:
                     faulty_component = "Unknown"
                     accuracy = 0.0
 
