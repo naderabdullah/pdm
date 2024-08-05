@@ -145,13 +145,13 @@
                     x: data.timestamps,
                     y: data.y_board_voltage,
                     mode: 'lines',
-                    name: 'Voltage'
+                    name: 'Board Voltage'
                 };
                 var boardVoltageTrace2 = {
-                    x: data.voltage_anomaly_timestamps,
+                    x: data.board_voltage_anomaly_timestamps,
                     y: data.y_board_voltage_lows,
                     mode: 'markers',
-                    name: 'Voltage Lows',
+                    name: 'Board Voltage Lows',
                     marker: { color: 'orange' }
                 };
                 var boardVoltageTrace3 = {
@@ -180,7 +180,7 @@
         }
 
         $(document).ready(function() {
-            setInterval(updatePlot, 1000);
+            setInterval(updatePlot, 500);
 
             $('#submitButton').on('click', function() {
                 window.location.href = '/submit_form';
